@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Firebase Blaster</title>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; background: #f0f0f0; }
+    .wrapper { display: flex; }
+    .line-numbers {
+      padding: 8px;
+      background: #e0e0e0;
+      color: #555;
+      font-family: monospace;
+      text-align: right;
+      user-select: none;
+    }
+    .line-numbers, .input-area {
+      height: 200px;
+      overflow: auto;
+    }
+    .input-area {
+      width: 100%;
+      font-family: monospace;
+      padding: 8px;
+      border: 1px solid #ccc;
+      resize: none;
+    }
+    button { margin-top: 1rem; padding: 10px 20px; }
+    .status-row {
+      margin-top: 0.5rem;
+      font-weight: bold;
+    }
+    .progress { margin-left: 1rem; }
+    .eta { margin-left: 1rem; font-style: italic; color: #555; }
+    .sent-count { margin-left: 1rem; color: green; }
+    .fail-count { margin-left: 1rem; color: red; }
+    .log {
+      margin-top: 1rem;
+      font-family: monospace;
+      background: #fff;
+      padding: 1rem;
+      border: 1px solid #ccc;
+    }
+    .log div {
+      border-bottom: 1px dashed #ccc;
+      padding: 2px 0;
+    }
+  </style>
+</head>
+<body>
+  <h2>Firebase Blaster by @deeztheman</h2>
+  <p>Paste one email per line:</p>
+  <div class="wrapper">
+    <pre class="line-numbers" id="lineNumbers">1</pre>
+    <textarea id="emailList" class="input-area" oninput="numberLines()" onscroll="syncScroll()"></textarea>
+  </div>
+  <button onclick="autoImportAndSend()">Run</button>
+  <div class="status-row">
+    <span class="progress" id="progress">0%</span>
+    <span class="eta" id="eta">ETA: 00:00:00</span>
+    <span class="sent-count" id="sentCount">Sent: 0</span>
+    <span class="fail-count" id="failCount">Failed: 0</span>
+  </div>
+  <div class="log" id="log"></div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCkNIJMteyKFje1MlI9_BmDXBDlYoYD8Yo",
+      authDomain: "support-send.firebaseapp.com",
+      projectId: "853812193676",
+      appId: "1:853812193676:web:ada018fd186971abb60ea9"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+
+    function numberLines() {
+      const textarea = document.getElementById('emailList');
+      const lineNumbers = document.getElementById('lineNumbers');
+      const lines = textarea.value.split('\n').length;
+      lineNumbers.textContent = Array.from({ length: lines }, (_, i) => i + 1).join('\n');
+    }
+
+    function syncScroll() {
+      const textarea = document.getElementById('emailList');
+      const lineNumbers = document.getElementById('lineNumbers');
+      lineNumbers.scrollTop = textarea.scrollTop;
+    }
+
+    function formatETA(seconds) {
+      const hrs = String(Math.floor(seconds / 3600)).padStart(2, '0');
+      const mins = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+      const secs = String(Math.floor(seconds % 60)).padStart(2, '0');
+      return `${hrs}:${mins}:${secs}`;
+    }
+
+    async function autoImportAndSend() {
+      const emails = document.getElementById('emailList').value.split('\n').map(e => e.trim()).filter(e => e);
+      const log = document.getElementById('log');
+      const progress = document.getElementById('progress');
+      const etaDisplay = document.getElementById('eta');
+      const sentCountDisplay = document.getElementById('sentCount');
+      const failCountDisplay = document.getElementById('failCount');
+
+      log.innerHTML = '<div>⏳ Processing...</div>';
+      progress.textContent = '0%';
+      etaDisplay.textContent = `ETA: ${formatETA(emails.length * 2.6)}`;
+
+      let completed = 0;
+      let sent = 0;
+      let failed = 0;
+      const total = emails.length;
+
+      const batchSize = 10;
+      const delayBetweenBatches = 2500;
+
+      async function handleSingleEmail(email, index) {
+        let message;
+        try {
+          const res = await fetch('http://localhost:3000/createUser', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password: 'samepassword123' })
+          });
+          if (!res.ok) throw new Error(await res.text());
+
+          await firebase.auth().signOut();
+          await firebase.auth().signInWithEmailAndPassword(email, 'samepassword123');
+        
+          await firebase.auth().sendPasswordResetEmail(email);
+
+          message = `✅ Line ${index + 1}: ${email} sent`;
+          sent++;
+        } catch (err) {
+          message = `❌ Line ${index + 1}: Failed for ${email}: ${err.message}`;
+          failed++;
+        }
+
+        const div = document.createElement('div');
+        div.textContent = message;
+        log.appendChild(div);
+
+        completed++;
+        progress.textContent = `${Math.round((completed / total) * 100)}%`;
+        const remaining = (total - completed) * 2.6;
+        etaDisplay.textContent = `ETA: ${formatETA(remaining)}`;
+        sentCountDisplay.textContent = `Sent: ${sent}`;
+        failCountDisplay.textContent = `Failed: ${failed}`;
+      }
+
+      for (let i = 0; i < emails.length; i += batchSize) {
+        const batch = emails.slice(i, i + batchSize);
+        await Promise.allSettled(batch.map((email, j) => handleSingleEmail(email, i + j)));
+        await new Promise(res => setTimeout(res, delayBetweenBatches));
+      }
+
+      setTimeout(() => {
+        alert('✅ All emails have been processed!');
+      }, 100);
+    }
+  </script>
+</body>
+</html>
